@@ -1,0 +1,15 @@
+{
+    "go.gopath": "/home/lubenets/go",
+    "go.goroot": "/usr/local/go",
+    "go.useLanguageServer": true,
+    "go.toolsEnvVars": {
+        "CGO_LDFLAGS_ALLOW": ".*",
+        "CFLAGS": "-I${workspaceFolder}/dpdk/dpdk/x86_64-native-linuxapp-gcc-install/usr/local/share/dpdk/x86_64-native-linuxapp-gcc/include -O3 -std=gnu11 -m64 -pthread -march=native -mno-fsgsbase -mno-f16c -DRTE_MACHINE_CPUFLAG_SSE -DRTE_MACHINE_CPUFLAG_SSE2 -DRTE_MACHINE_CPUFLAG_SSE3 -DRTE_MACHINE_CPUFLAG_SSSE3 -DRTE_MACHINE_CPUFLAG_SSE4_1 -DRTE_MACHINE_CPUFLAG_SSE4_2 -DRTE_MACHINE_CPUFLAG_PCLMULQDQ -DRTE_MACHINE_CPUFLAG_RDRAND -DRTE_MACHINE_CPUFLAG_F16C -include rte_config.h -Wno-deprecated-declarations",
+        "CGO_CFLAGS": "-I${workspaceFolder}/dpdk/dpdk/x86_64-native-linuxapp-gcc-install/usr/local/share/dpdk/x86_64-native-linuxapp-gcc/include -O3 -std=gnu11 -m64 -pthread -march=native -mno-fsgsbase -mno-f16c -DRTE_MACHINE_CPUFLAG_SSE -DRTE_MACHINE_CPUFLAG_SSE2 -DRTE_MACHINE_CPUFLAG_SSE3 -DRTE_MACHINE_CPUFLAG_SSSE3 -DRTE_MACHINE_CPUFLAG_SSE4_1 -DRTE_MACHINE_CPUFLAG_SSE4_2 -DRTE_MACHINE_CPUFLAG_PCLMULQDQ -DRTE_MACHINE_CPUFLAG_RDRAND -DRTE_MACHINE_CPUFLAG_F16C -include rte_config.h -Wno-deprecated-declarations"
+    },
+    "terminal.integrated.env.linux": {
+        "GOPATH": "/home/lubenets/go",
+        "GOROOT": "/usr/local/go",
+        "DPDK_DIR": "dpdk"
+    }
+}

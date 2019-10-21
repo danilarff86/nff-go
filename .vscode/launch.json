@@ -1,0 +1,54 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "(gdb) Launch fec-server",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/sdwan-fec-tunnel/bin/fec-server",
+            "args": [
+                "-c=../test_server/my_server.json",
+                "-f=../test_server/my_static_conf.json"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/sdwan-fec-tunnel/bin",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/home/lubenets/pcworkspace/sgdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        },
+        {
+            "name": "(gdb) Launch fec-server 3",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/sdwan-fec-tunnel/bin/fec-server",
+            "args": [
+                "-c=../test_server/my_server_3.json",
+                "-f=../test_server/my_static_conf.json"
+            ],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/sdwan-fec-tunnel/bin",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "miDebuggerPath": "/home/lubenets/pcworkspace/sgdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ]
+        }
+    ]
+}

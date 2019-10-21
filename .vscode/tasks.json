@@ -1,0 +1,82 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build all",
+            "type": "process",
+            "command": "make",
+            "options": {
+                "cwd": "${workspaceRoot}",
+                "env": {
+                    "NFF_GO_NO_MLX_DRIVERS": "y",
+                    "NFF_GO_NO_BPF_SUPPORT": "y"
+                }
+            },
+            "args": [
+                "-j",
+                "16"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        },
+        {
+            "label": "Build tun-dpdk",
+            "type": "process",
+            "command": "make",
+            "options": {
+                "cwd": "${workspaceRoot}",
+                "env": {
+                    "NFF_GO_NO_MLX_DRIVERS": "y",
+                    "NFF_GO_NO_BPF_SUPPORT": "y"
+                }
+            },
+            "args": [
+                "-C",
+                "tun-dpdk"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        },
+        {
+            "label": "Build examples",
+            "type": "process",
+            "command": "make",
+            "options": {
+                "cwd": "${workspaceRoot}",
+                "env": {
+                    "NFF_GO_NO_MLX_DRIVERS": "y",
+                    "NFF_GO_NO_BPF_SUPPORT": "y"
+                }
+            },
+            "args": [
+                "-C",
+                "examples"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        },
+        {
+            "label": "Run tun-dpdk",
+            "type": "process",
+            "command": "sudo",
+            "options": {
+                "cwd": "${workspaceRoot}/tun-dpdk"
+            },
+            "args": [
+                "./tun_dpdk"
+            ],
+            "presentation": {
+                "reveal": "always",
+                "panel": "new"
+            }
+        }
+    ]
+}
