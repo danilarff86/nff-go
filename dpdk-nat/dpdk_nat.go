@@ -13,6 +13,8 @@ import (
 	"unsafe"
 )
 
+const vecSize = 32
+
 type HostConfig struct {
 	ethIP   types.IPv4Address
 	macAddr [types.EtherAddrLen]uint8
@@ -123,147 +125,94 @@ func main() {
 
 	firstFlow, err := flow.SetReceiver(config.ports[0].ethPort)
 	flow.CheckFatal(err)
-	flow.CheckFatal(flow.SetHandler(firstFlow, handler, PortContext{index: 0}))
-	flow.CheckFatal(flow.SetStopper(firstFlow))
+	flow.CheckFatal(flow.SetVectorHandler(firstFlow, myVectorHandler, PortContext{index: 0}))
+	flow.CheckFatal(flow.SetSender(firstFlow, config.ports[1].ethPort))
 
 	secondFlow, err := flow.SetReceiver(config.ports[1].ethPort)
 	flow.CheckFatal(err)
-	flow.CheckFatal(flow.SetHandler(secondFlow, handler, PortContext{index: 1}))
-	flow.CheckFatal(flow.SetStopper(secondFlow))
+	flow.CheckFatal(flow.SetVectorHandler(secondFlow, myVectorHandler, PortContext{index: 1}))
+	flow.CheckFatal(flow.SetSender(secondFlow, config.ports[0].ethPort))
 
 	flow.CheckFatal(flow.SystemStart())
 }
 
-func handler(current *packet.Packet, ctx flow.UserContext) {
-	portContext, ok := ctx.(PortContext)
-	if !ok {
-		println("Unable to upcast UserContext to PortContext")
-	}
-
-	for pkt := current; pkt != nil; pkt = pkt.Next {
-
-		pkt.ParseL3()
-		arp := pkt.GetARPCheckVLAN()
-		// ARP can be only in IPv4. IPv6 replace it with modified ICMP
-		if arp != nil {
-			if packet.SwapBytesUint16(arp.Operation) != packet.ARPRequest ||
-				arp.THA != [types.EtherAddrLen]byte{} {
-				return
+func myVectorHandler(curV []*packet.Packet, mask *[vecSize]bool, ctx flow.UserContext) {
+	for i := uint(0); i < vecSize; i++ {
+		if (*mask)[i] == true {
+			portContext, ok := ctx.(PortContext)
+			if !ok {
+				println("Unable to upcast UserContext to PortContext")
 			}
 
-			if types.ArrayToIPv4(arp.TPA) != config.ports[portContext.index].local.ethIP {
-				return
-			}
+			for pkt := curV[i]; pkt != nil; pkt = pkt.Next {
 
-			// Prepare an answer to this request
-			answerPacket, err := packet.NewPacket()
-			if err != nil {
-				common.LogFatal(common.Debug, err)
-			}
-			packet.InitARPReplyPacket(answerPacket, config.ports[portContext.index].local.macAddr, arp.SHA, types.ArrayToIPv4(arp.TPA), types.ArrayToIPv4(arp.SPA))
-			answerPacket.SendPacket(config.ports[portContext.index].ethPort)
+				pkt.ParseL3()
+				arp := pkt.GetARPCheckVLAN()
+				// ARP can be only in IPv4. IPv6 replace it with modified ICMP
+				if arp != nil {
+					if packet.SwapBytesUint16(arp.Operation) != packet.ARPRequest ||
+						arp.THA != [types.EtherAddrLen]byte{} {
+						(*mask)[i] = false
+					}
 
-			return
-		}
+					if types.ArrayToIPv4(arp.TPA) != config.ports[portContext.index].local.ethIP {
+						(*mask)[i] = false
+					}
 
-		/*ipv4 := pkt.GetIPv4()
-		if ipv4 != nil {
-			pkt.ParseL4ForIPv4()
-			if icmp := pkt.GetICMPForIPv4(); icmp != nil {
-				// Check that received ICMP packet is echo request packet.
-				if icmp.Type != types.ICMPTypeEchoRequest || icmp.Code != 0 {
-					return
+					// Prepare an answer to this request
+					answerPacket, err := packet.NewPacket()
+					if err != nil {
+						common.LogFatal(common.Debug, err)
+					}
+					packet.InitARPReplyPacket(answerPacket, config.ports[portContext.index].local.macAddr, arp.SHA, types.ArrayToIPv4(arp.TPA), types.ArrayToIPv4(arp.SPA))
+					answerPacket.SendPacket(config.ports[portContext.index].ethPort)
+
+					(*mask)[i] = false
 				}
 
-				// Check that received ICMP packet is addressed at this host.
-				if ipv4.DstAddr != config.ports[portContext.index].local.ethIP {
-					return
+				ipv4 := pkt.GetIPv4()
+				if ipv4 != nil {
+					// Check that received ICMP packet is addressed at this host.
+					if ipv4.DstAddr != config.ports[portContext.index].local.ethIP {
+						(*mask)[i] = false
+					}
+
+					pkt.ParseL4ForIPv4()
+
+					sndConf := config.ports[portContext.index^1]
+
+					pkt.Ether.DAddr = sndConf.remote.macAddr
+					pkt.Ether.SAddr = sndConf.local.macAddr
+					pkt.ParseL3()
+					(pkt.GetIPv4NoCheck()).DstAddr = sndConf.remote.ethIP
+					(pkt.GetIPv4NoCheck()).SrcAddr = sndConf.local.ethIP
+					(pkt.GetIPv4NoCheck()).HdrChecksum = packet.SwapBytesUint16(packet.CalculateIPv4Checksum(pkt.GetIPv4NoCheck()))
+					pkt.ParseL4ForIPv4()
+
+					switch ipProto := (pkt.GetIPv4NoCheck()).NextProtoID; ipProto {
+					case types.ICMPNumber:
+						{
+							//log.Printf("ICMP\n")
+							pkt.ParseL7(types.ICMPNumber)
+							(pkt.GetICMPNoCheck()).Cksum = packet.SwapBytesUint16(packet.CalculateIPv4ICMPChecksum(pkt.GetIPv4NoCheck(), pkt.GetICMPNoCheck(), pkt.Data))
+						}
+					case types.TCPNumber:
+						{
+							//log.Printf("TCP\n")
+							pkt.Data = unsafe.Pointer(uintptr(pkt.L4) + uintptr(types.TCPMinLen))
+							(pkt.GetTCPNoCheck()).Cksum = packet.SwapBytesUint16(packet.CalculateIPv4TCPChecksum(pkt.GetIPv4NoCheck(), pkt.GetTCPNoCheck(), pkt.Data))
+						}
+					case types.UDPNumber:
+						{
+							//log.Printf("UDP\n")
+							pkt.ParseL7(types.UDPNumber)
+							(pkt.GetUDPNoCheck()).DgramCksum = packet.SwapBytesUint16(packet.CalculateIPv4UDPChecksum(pkt.GetIPv4NoCheck(), pkt.GetUDPNoCheck(), pkt.Data))
+						}
+					default:
+						(*mask)[i] = false
+					}
 				}
-
-				// Return a packet back to sender
-				answerPacket, err := packet.NewPacket()
-				if err != nil {
-					common.LogFatal(common.Debug, err)
-				}
-				// TODO need to initilize new packet instead of copying
-				packet.GeneratePacketFromByte(answerPacket, pkt.GetRawPacketBytes())
-				answerPacket.Ether.DAddr = pkt.Ether.SAddr
-				answerPacket.Ether.SAddr = pkt.Ether.DAddr
-				answerPacket.ParseL3()
-				(answerPacket.GetIPv4NoCheck()).DstAddr = ipv4.SrcAddr
-				(answerPacket.GetIPv4NoCheck()).SrcAddr = ipv4.DstAddr
-				answerPacket.ParseL4ForIPv4()
-				(answerPacket.GetICMPNoCheck()).Type = types.ICMPTypeEchoResponse
-				ipv4.HdrChecksum = packet.SwapBytesUint16(packet.CalculateIPv4Checksum(ipv4))
-				answerPacket.ParseL7(types.ICMPNumber)
-				icmp.Cksum = packet.SwapBytesUint16(packet.CalculateIPv4ICMPChecksum(ipv4, icmp, answerPacket.Data))
-
-				answerPacket.SendPacket(config.ports[portContext.index].ethPort)
-
-				return
 			}
-		}*/
-		ipv4 := pkt.GetIPv4()
-		if ipv4 != nil {
-			// Check that received ICMP packet is addressed at this host.
-			if ipv4.DstAddr != config.ports[portContext.index].local.ethIP {
-				return
-			}
-
-			pkt.ParseL4ForIPv4()
-
-			sndConf := config.ports[portContext.index^1]
-
-			answerPacket, err := packet.NewPacket()
-			if err != nil {
-				common.LogFatal(common.Debug, err)
-			}
-			// TODO need to initilize new packet instead of copying
-			packet.GeneratePacketFromByte(answerPacket, pkt.GetRawPacketBytes())
-
-			answerPacket.Ether.DAddr = sndConf.remote.macAddr
-			answerPacket.Ether.SAddr = sndConf.local.macAddr
-			answerPacket.ParseL3()
-			(answerPacket.GetIPv4NoCheck()).DstAddr = sndConf.remote.ethIP
-			(answerPacket.GetIPv4NoCheck()).SrcAddr = sndConf.local.ethIP
-			(answerPacket.GetIPv4NoCheck()).HdrChecksum = packet.SwapBytesUint16(packet.CalculateIPv4Checksum(answerPacket.GetIPv4NoCheck()))
-			answerPacket.ParseL4ForIPv4()
-
-			switch ipProto := (answerPacket.GetIPv4NoCheck()).NextProtoID; ipProto {
-			case types.ICMPNumber:
-				{
-					//log.Printf("ICMP\n")
-					answerPacket.ParseL7(types.ICMPNumber)
-					(answerPacket.GetICMPNoCheck()).Cksum = packet.SwapBytesUint16(packet.CalculateIPv4ICMPChecksum(answerPacket.GetIPv4NoCheck(), answerPacket.GetICMPNoCheck(), answerPacket.Data))
-				}
-			case types.TCPNumber:
-				{
-					//log.Printf("TCP\n")
-					//answerPacket.ParseL7(types.TCPNumber)
-					answerPacket.Data = unsafe.Pointer(uintptr(answerPacket.L4) + uintptr(types.TCPMinLen))
-					(answerPacket.GetTCPNoCheck()).Cksum = packet.SwapBytesUint16(packet.CalculateIPv4TCPChecksum(answerPacket.GetIPv4NoCheck(), answerPacket.GetTCPNoCheck(), answerPacket.Data))
-
-					/*log.Printf("TCP data offset: %d\n", (((*packet.TCPHdr)(pkt.L4)).DataOff&0xf0)>>3)
-
-					pkt.ParseL7(types.TCPNumber)
-					tcpPacket := pkt.GetTCPForIPv4()
-					originCksum := tcpPacket.Cksum
-					tcpPacket.Cksum = 0
-					pkt.Data = unsafe.Pointer(uintptr(pkt.L4) + uintptr((((*packet.TCPHdr)(pkt.L4)).DataOff&0xf0)>>3))
-					tcpPacket.Cksum = packet.SwapBytesUint16(packet.CalculateIPv4TCPChecksum(pkt.GetIPv4(), tcpPacket, pkt.Data))
-					log.Printf("TCP checksum. Origin: %d, Recalculated %d\n", originCksum, tcpPacket.Cksum)*/
-				}
-			case types.UDPNumber:
-				{
-					//log.Printf("UDP\n")
-					answerPacket.ParseL7(types.UDPNumber)
-					(answerPacket.GetUDPNoCheck()).DgramCksum = packet.SwapBytesUint16(packet.CalculateIPv4UDPChecksum(answerPacket.GetIPv4NoCheck(), answerPacket.GetUDPNoCheck(), answerPacket.Data))
-				}
-			default:
-				return
-			}
-
-			answerPacket.SendPacket(sndConf.ethPort)
 		}
 	}
 }
