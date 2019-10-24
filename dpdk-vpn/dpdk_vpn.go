@@ -10,7 +10,7 @@ import (
 	"log"
 	"net"
 	"os"
-	"unsafe"
+	//"unsafe"
 )
 
 type HostConfig struct {
@@ -159,9 +159,9 @@ func handler(pkt *packet.Packet, ctx flow.UserContext) {
 			return
 		}
 
-		if types.ArrayToIPv4(arp.TPA) != portContext.config.local.ethIP {
+		/*if types.ArrayToIPv4(arp.TPA) != portContext.config.local.ethIP {
 			return
-		}
+		}*/
 
 		// Prepare an answer to this request
 		answerPacket, err := packet.NewPacket()
@@ -188,13 +188,7 @@ func handler(pkt *packet.Packet, ctx flow.UserContext) {
 }
 
 func encode(pkt *packet.Packet) {
-	ipv4 := pkt.GetIPv4NoCheck()
-	// Check that received ICMP packet is addressed at this host.
-	if ipv4.DstAddr != config.lan.local.ethIP {
-		return
-	}
-
-	pkt.ParseL4ForIPv4()
+	//log.Printf("Encoding Packet %x\n", pkt.GetRawPacketBytes())
 
 	sndConf := config.wan
 
@@ -202,45 +196,32 @@ func encode(pkt *packet.Packet) {
 	if err != nil {
 		common.LogFatal(common.Debug, err)
 	}
-	// TODO need to initilize new packet instead of copying
-	packet.GeneratePacketFromByte(answerPacket, pkt.GetRawPacketBytes())
+	ipPktLen := pkt.GetPacketLen() - types.EtherLen
+	packet.InitEmptyIPv4UDPPacket(answerPacket, ipPktLen)
 
 	answerPacket.Ether.DAddr = sndConf.remote.macAddr
 	answerPacket.Ether.SAddr = sndConf.local.macAddr
-	answerPacket.ParseL3()
+	//answerPacket.ParseL3()
 	(answerPacket.GetIPv4NoCheck()).DstAddr = sndConf.remote.ethIP
 	(answerPacket.GetIPv4NoCheck()).SrcAddr = sndConf.local.ethIP
 	(answerPacket.GetIPv4NoCheck()).HdrChecksum = packet.SwapBytesUint16(packet.CalculateIPv4Checksum(answerPacket.GetIPv4NoCheck()))
-	answerPacket.ParseL4ForIPv4()
+	//answerPacket.ParseL4ForIPv4()
 
-	switch ipProto := (answerPacket.GetIPv4NoCheck()).NextProtoID; ipProto {
-	case types.ICMPNumber:
-		{
-			//log.Printf("ICMP\n")
-			answerPacket.ParseL7(types.ICMPNumber)
-			(answerPacket.GetICMPNoCheck()).Cksum = packet.SwapBytesUint16(packet.CalculateIPv4ICMPChecksum(answerPacket.GetIPv4NoCheck(), answerPacket.GetICMPNoCheck(), answerPacket.Data))
-		}
-	case types.TCPNumber:
-		{
-			//log.Printf("TCP\n")
-			//answerPacket.ParseL7(types.TCPNumber)
-			answerPacket.Data = unsafe.Pointer(uintptr(answerPacket.L4) + uintptr(types.TCPMinLen))
-			(answerPacket.GetTCPNoCheck()).Cksum = packet.SwapBytesUint16(packet.CalculateIPv4TCPChecksum(answerPacket.GetIPv4NoCheck(), answerPacket.GetTCPNoCheck(), answerPacket.Data))
-		}
-	case types.UDPNumber:
-		{
-			//log.Printf("UDP\n")
-			answerPacket.ParseL7(types.UDPNumber)
-			(answerPacket.GetUDPNoCheck()).DgramCksum = packet.SwapBytesUint16(packet.CalculateIPv4UDPChecksum(answerPacket.GetIPv4NoCheck(), answerPacket.GetUDPNoCheck(), answerPacket.Data))
-		}
-	default:
-		return
-	}
+	ipv4PktBytes := (*[1 << 30]byte)(pkt.L3)[:ipPktLen]
+	answerPacketDataBytes := (*[1 << 30]byte)(answerPacket.Data)[:ipPktLen]
+	copy(answerPacketDataBytes, ipv4PktBytes)
+
+	//answerPacket.ParseL7(types.UDPNumber)
+	(answerPacket.GetUDPNoCheck()).DgramCksum = packet.SwapBytesUint16(packet.CalculateIPv4UDPChecksum(answerPacket.GetIPv4NoCheck(), answerPacket.GetUDPNoCheck(), answerPacket.Data))
+
+	//log.Printf("Encoded Packet %x\n", answerPacket.GetRawPacketBytes())
 
 	answerPacket.SendPacket(sndConf.ethPort)
 }
 
 func decode(pkt *packet.Packet) {
+	//log.Printf("Decoding Packet %x\n", pkt.GetRawPacketBytes())
+
 	ipv4 := pkt.GetIPv4NoCheck()
 	// Check that received ICMP packet is addressed at this host.
 	if ipv4.DstAddr != config.wan.local.ethIP {
@@ -249,46 +230,32 @@ func decode(pkt *packet.Packet) {
 
 	pkt.ParseL4ForIPv4()
 
+	udpPkt := pkt.GetUDPForIPv4()
+	if udpPkt == nil {
+		return
+	}
+
+	pkt.ParseL7(types.UDPNumber)
+
+	ipPktLen := packet.SwapBytesUint16(udpPkt.DgramLen) - types.UDPLen
+
 	sndConf := config.lan
 
 	answerPacket, err := packet.NewPacket()
 	if err != nil {
 		common.LogFatal(common.Debug, err)
 	}
-	// TODO need to initilize new packet instead of copying
-	packet.GeneratePacketFromByte(answerPacket, pkt.GetRawPacketBytes())
+	packet.InitEmptyPacket(answerPacket, uint(ipPktLen))
+	answerPacket.Ether.EtherType = packet.SwapBytesUint16(types.IPV4Number)
 
 	answerPacket.Ether.DAddr = sndConf.remote.macAddr
 	answerPacket.Ether.SAddr = sndConf.local.macAddr
-	answerPacket.ParseL3()
-	(answerPacket.GetIPv4NoCheck()).DstAddr = sndConf.remote.ethIP
-	(answerPacket.GetIPv4NoCheck()).SrcAddr = sndConf.local.ethIP
-	(answerPacket.GetIPv4NoCheck()).HdrChecksum = packet.SwapBytesUint16(packet.CalculateIPv4Checksum(answerPacket.GetIPv4NoCheck()))
-	answerPacket.ParseL4ForIPv4()
 
-	switch ipProto := (answerPacket.GetIPv4NoCheck()).NextProtoID; ipProto {
-	case types.ICMPNumber:
-		{
-			//log.Printf("ICMP\n")
-			answerPacket.ParseL7(types.ICMPNumber)
-			(answerPacket.GetICMPNoCheck()).Cksum = packet.SwapBytesUint16(packet.CalculateIPv4ICMPChecksum(answerPacket.GetIPv4NoCheck(), answerPacket.GetICMPNoCheck(), answerPacket.Data))
-		}
-	case types.TCPNumber:
-		{
-			//log.Printf("TCP\n")
-			//answerPacket.ParseL7(types.TCPNumber)
-			answerPacket.Data = unsafe.Pointer(uintptr(answerPacket.L4) + uintptr(types.TCPMinLen))
-			(answerPacket.GetTCPNoCheck()).Cksum = packet.SwapBytesUint16(packet.CalculateIPv4TCPChecksum(answerPacket.GetIPv4NoCheck(), answerPacket.GetTCPNoCheck(), answerPacket.Data))
-		}
-	case types.UDPNumber:
-		{
-			//log.Printf("UDP\n")
-			answerPacket.ParseL7(types.UDPNumber)
-			(answerPacket.GetUDPNoCheck()).DgramCksum = packet.SwapBytesUint16(packet.CalculateIPv4UDPChecksum(answerPacket.GetIPv4NoCheck(), answerPacket.GetUDPNoCheck(), answerPacket.Data))
-		}
-	default:
-		return
-	}
+	ipv4PktBytes := (*[1 << 30]byte)(pkt.Data)[:ipPktLen]
+	answerPacketBytes := answerPacket.GetRawPacketBytes()[types.EtherLen:types.EtherLen+ipPktLen]
+	copy(answerPacketBytes, ipv4PktBytes)
+
+	//log.Printf("Decoded Packet %x\n", answerPacket.GetRawPacketBytes())
 
 	answerPacket.SendPacket(sndConf.ethPort)
 }
