@@ -5,6 +5,7 @@ import (
 	"flag"
 	"github.com/intel-go/nff-go/common"
 	"github.com/intel-go/nff-go/flow"
+	"github.com/intel-go/nff-go/internal/low"
 	"github.com/intel-go/nff-go/packet"
 	"github.com/intel-go/nff-go/types"
 	"log"
@@ -133,106 +134,116 @@ func main() {
 
 	firstFlow, err := flow.SetReceiver(config.lan.ethPort)
 	flow.CheckFatal(err)
-	flow.CheckFatal(flow.SetHandler(firstFlow, handler, PortContext{port: LanPort, config: &config.lan}))
-	flow.CheckFatal(flow.SetStopper(firstFlow))
+	//flow.CheckFatal(flow.SetHandler(firstFlow, handler, PortContext{port: LanPort, config: &config.lan}))
+	flow.CheckFatal(flow.SetVectorHandler(firstFlow, myVectorHandler, PortContext{port: LanPort, config: &config.lan}))
+	//flow.CheckFatal(flow.SetStopper(firstFlow))
+	flow.CheckFatal(flow.SetSender(firstFlow, config.wan.ethPort))
 
 	secondFlow, err := flow.SetReceiver(config.wan.ethPort)
 	flow.CheckFatal(err)
-	flow.CheckFatal(flow.SetHandler(secondFlow, handler, PortContext{port: WanPort, config: &config.wan}))
-	flow.CheckFatal(flow.SetStopper(secondFlow))
+	//flow.CheckFatal(flow.SetHandler(secondFlow, handler, PortContext{port: WanPort, config: &config.wan}))
+	flow.CheckFatal(flow.SetVectorHandler(secondFlow, myVectorHandler, PortContext{port: WanPort, config: &config.wan}))
+	//flow.CheckFatal(flow.SetStopper(secondFlow))
+	flow.CheckFatal(flow.SetSender(secondFlow, config.lan.ethPort))
 
 	flow.CheckFatal(flow.SystemStart())
 }
 
-func handler(pkt *packet.Packet, ctx flow.UserContext) {
+func myVectorHandler(curV []*packet.Packet, mask *[vecSize]bool, ctx flow.UserContext) {
 	portContext, ok := ctx.(PortContext)
 	if !ok {
 		println("Unable to upcast UserContext to PortContext")
 	}
 
-	pkt.ParseL3()
-	arp := pkt.GetARPCheckVLAN()
-	// ARP can be only in IPv4. IPv6 replace it with modified ICMP
-	if arp != nil {
-		if packet.SwapBytesUint16(arp.Operation) != packet.ARPRequest ||
-			arp.THA != [types.EtherAddrLen]byte{} {
-			return
-		}
+	for i := uint(0); i < vecSize; i++ {
+		if (*mask)[i] == true {
+			(*mask)[i] = false
 
-		/*if types.ArrayToIPv4(arp.TPA) != portContext.config.local.ethIP {
-			return
-		}*/
+			pkt := curV[i]
 
-		// Prepare an answer to this request
-		answerPacket, err := packet.NewPacket()
-		if err != nil {
-			common.LogFatal(common.Debug, err)
-		}
-		packet.InitARPReplyPacket(answerPacket, portContext.config.local.macAddr, arp.SHA, types.ArrayToIPv4(arp.TPA), types.ArrayToIPv4(arp.SPA))
-		answerPacket.SendPacket(portContext.config.ethPort)
+			pkt.ParseL3()
+			arp := pkt.GetARPCheckVLAN()
+			// ARP can be only in IPv4. IPv6 replace it with modified ICMP
+			if arp != nil {
+				if packet.SwapBytesUint16(arp.Operation) != packet.ARPRequest ||
+					arp.THA != [types.EtherAddrLen]byte{} {
+					continue
+				}
 
-		return
-	}
+				/*if types.ArrayToIPv4(arp.TPA) != portContext.config.local.ethIP {
+					return
+				}*/
 
-	ipv4 := pkt.GetIPv4()
-	if ipv4 != nil {
-		switch portContext.port {
-		case LanPort:
-			//log.Printf("LAN IP Packet\n")
-			encode(pkt)
-		case WanPort:
-			//log.Printf("WAN IP Packet\n")
-			decode(pkt)
+				// Prepare an answer to this request
+				answerPacket, err := packet.NewPacket()
+				if err != nil {
+					common.LogFatal(common.Debug, err)
+				}
+				packet.InitARPReplyPacket(answerPacket, portContext.config.local.macAddr, arp.SHA, types.ArrayToIPv4(arp.TPA), types.ArrayToIPv4(arp.SPA))
+				answerPacket.SendPacket(portContext.config.ethPort)
+
+				continue
+			}
+
+			ipv4 := pkt.GetIPv4()
+			if ipv4 != nil {
+				switch portContext.port {
+				case LanPort:
+					//log.Printf("LAN IP Packet\n")
+					(*mask)[i] = encode(pkt)
+				case WanPort:
+					//log.Printf("WAN IP Packet\n")
+					(*mask)[i] = decode(pkt)
+				}
+			}
 		}
 	}
 }
 
-func encode(pkt *packet.Packet) {
+func encode(pkt *packet.Packet) bool {
 	//log.Printf("Encoding Packet %x\n", pkt.GetRawPacketBytes())
 
 	sndConf := config.wan
 
-	answerPacket, err := packet.NewPacket()
-	if err != nil {
-		common.LogFatal(common.Debug, err)
-	}
 	ipPktLen := pkt.GetPacketLen() - types.EtherLen
-	packet.InitEmptyIPv4UDPPacket(answerPacket, ipPktLen)
-
-	answerPacket.Ether.DAddr = sndConf.remote.macAddr
-	answerPacket.Ether.SAddr = sndConf.local.macAddr
-	//answerPacket.ParseL3()
-	(answerPacket.GetIPv4NoCheck()).DstAddr = sndConf.remote.ethIP
-	(answerPacket.GetIPv4NoCheck()).SrcAddr = sndConf.local.ethIP
-	(answerPacket.GetIPv4NoCheck()).HdrChecksum = packet.SwapBytesUint16(packet.CalculateIPv4Checksum(answerPacket.GetIPv4NoCheck()))
-	//answerPacket.ParseL4ForIPv4()
 
 	ipv4PktBytes := (*[1 << 30]byte)(pkt.L3)[:ipPktLen]
-	answerPacketDataBytes := (*[1 << 30]byte)(answerPacket.Data)[:ipPktLen]
+	answerPacketDataBytes := pkt.GetRawPacketBytes()[types.EtherLen+types.IPv4MinLen+types.UDPLen : types.EtherLen+types.IPv4MinLen+types.UDPLen+ipPktLen]
 	copy(answerPacketDataBytes, ipv4PktBytes)
 
+	packet.InitEmptyIPv4UDPPacket(pkt, 0)
+	low.TrimMbuf(pkt.CMbuf, types.EtherLen)
+
+	pkt.Ether.DAddr = sndConf.remote.macAddr
+	pkt.Ether.SAddr = sndConf.local.macAddr
+
+	(pkt.GetIPv4NoCheck()).DstAddr = sndConf.remote.ethIP
+	(pkt.GetIPv4NoCheck()).SrcAddr = sndConf.local.ethIP
+	(pkt.GetIPv4NoCheck()).HdrChecksum = packet.SwapBytesUint16(packet.CalculateIPv4Checksum(pkt.GetIPv4NoCheck()))
+
 	//answerPacket.ParseL7(types.UDPNumber)
-	(answerPacket.GetUDPNoCheck()).DgramCksum = packet.SwapBytesUint16(packet.CalculateIPv4UDPChecksum(answerPacket.GetIPv4NoCheck(), answerPacket.GetUDPNoCheck(), answerPacket.Data))
+	(pkt.GetUDPNoCheck()).DgramLen = packet.SwapBytesUint16(uint16(types.UDPLen + ipPktLen))
+	(pkt.GetUDPNoCheck()).DgramCksum = packet.SwapBytesUint16(packet.CalculateIPv4UDPChecksum(pkt.GetIPv4NoCheck(), pkt.GetUDPNoCheck(), pkt.Data))
 
-	//log.Printf("Encoded Packet %x\n", answerPacket.GetRawPacketBytes())
+	//log.Printf("Encoded Packet %x\n", pkt.GetRawPacketBytes())
 
-	answerPacket.SendPacket(sndConf.ethPort)
+	return true
 }
 
-func decode(pkt *packet.Packet) {
+func decode(pkt *packet.Packet) bool {
 	//log.Printf("Decoding Packet %x\n", pkt.GetRawPacketBytes())
 
 	ipv4 := pkt.GetIPv4NoCheck()
 	// Check that received ICMP packet is addressed at this host.
 	if ipv4.DstAddr != config.wan.local.ethIP {
-		return
+		return false
 	}
 
 	pkt.ParseL4ForIPv4()
 
 	udpPkt := pkt.GetUDPForIPv4()
 	if udpPkt == nil {
-		return
+		return false
 	}
 
 	pkt.ParseL7(types.UDPNumber)
@@ -241,21 +252,16 @@ func decode(pkt *packet.Packet) {
 
 	sndConf := config.lan
 
-	answerPacket, err := packet.NewPacket()
-	if err != nil {
-		common.LogFatal(common.Debug, err)
-	}
-	packet.InitEmptyPacket(answerPacket, uint(ipPktLen))
-	answerPacket.Ether.EtherType = packet.SwapBytesUint16(types.IPV4Number)
-
-	answerPacket.Ether.DAddr = sndConf.remote.macAddr
-	answerPacket.Ether.SAddr = sndConf.local.macAddr
+	pkt.Ether.EtherType = packet.SwapBytesUint16(types.IPV4Number)
+	pkt.Ether.DAddr = sndConf.remote.macAddr
+	pkt.Ether.SAddr = sndConf.local.macAddr
 
 	ipv4PktBytes := (*[1 << 30]byte)(pkt.Data)[:ipPktLen]
-	answerPacketBytes := answerPacket.GetRawPacketBytes()[types.EtherLen:types.EtherLen+ipPktLen]
+	low.TrimMbuf(pkt.CMbuf, types.IPv4MinLen + types.UDPLen)
+	answerPacketBytes := pkt.GetRawPacketBytes()[types.EtherLen : types.EtherLen+ipPktLen]
 	copy(answerPacketBytes, ipv4PktBytes)
 
-	//log.Printf("Decoded Packet %x\n", answerPacket.GetRawPacketBytes())
+	//log.Printf("Decoded Packet %x\n", pkt.GetRawPacketBytes())
 
-	answerPacket.SendPacket(sndConf.ethPort)
+	return true
 }
