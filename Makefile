@@ -3,7 +3,7 @@
 # license that can be found in the LICENSE file.
 
 PATH_TO_MK = mk
-SUBDIRS = nff-go-base dpdk test examples tun-dpdk dpdk-nat dpdk-vpn
+SUBDIRS = nff-go-base dpdk test examples tun-dpdk dpdk-nat dpdk-vpn dpdk-kni
 CI_TESTING_TARGETS = packet internal/low common
 TESTING_TARGETS = $(CI_TESTING_TARGETS) test/stability
 
