@@ -252,7 +252,7 @@ func decode(pkt *packet.Packet) {
 	answerPacket.Ether.SAddr = sndConf.local.macAddr
 
 	ipv4PktBytes := (*[1 << 30]byte)(pkt.Data)[:ipPktLen]
-	answerPacketBytes := answerPacket.GetRawPacketBytes()[types.EtherLen:types.EtherLen+ipPktLen]
+	answerPacketBytes := answerPacket.GetRawPacketBytes()[types.EtherLen : types.EtherLen+ipPktLen]
 	copy(answerPacketBytes, ipv4PktBytes)
 
 	//log.Printf("Decoded Packet %x\n", answerPacket.GetRawPacketBytes())
