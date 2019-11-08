@@ -7,6 +7,7 @@ import (
 	"github.com/intel-go/nff-go/flow"
 	"github.com/intel-go/nff-go/packet"
 	"github.com/intel-go/nff-go/types"
+	lfqueue "github.com/xiaonanln/go-lockfree-queue"
 	"log"
 	"net"
 	"os"
@@ -102,6 +103,9 @@ func loadConfiguration(file string) Config {
 var config Config
 
 const vecSize = 32
+const sizeMultiplier = 64
+
+var ringBuffer *lfqueue.Queue
 
 type EthPortEnum int
 
@@ -131,10 +135,15 @@ func main() {
 
 	flow.CheckFatal(flow.SystemInit(nil))
 
+	ringBuffer = lfqueue.NewQueue(vecSize * sizeMultiplier)
+
 	firstFlow, err := flow.SetReceiver(config.lan.ethPort)
 	flow.CheckFatal(err)
 	flow.CheckFatal(flow.SetHandler(firstFlow, handler, PortContext{port: LanPort, config: &config.lan}))
 	flow.CheckFatal(flow.SetStopper(firstFlow))
+
+	wanTXFlow := flow.SetGenerator(wanTXGen, nil)
+	flow.CheckFatal(flow.SetStopper(wanTXFlow))
 
 	secondFlow, err := flow.SetReceiver(config.wan.ethPort)
 	flow.CheckFatal(err)
@@ -142,6 +151,13 @@ func main() {
 	flow.CheckFatal(flow.SetStopper(secondFlow))
 
 	flow.CheckFatal(flow.SystemStart())
+}
+
+func wanTXGen(pkt *packet.Packet, context flow.UserContext) {
+	sndPkt, ok := ringBuffer.Get()
+	if ok {
+		sndPkt.(*packet.Packet).SendPacket(config.wan.ethPort)
+	}
 }
 
 func handler(pkt *packet.Packet, ctx flow.UserContext) {
@@ -216,7 +232,13 @@ func encode(pkt *packet.Packet) {
 
 	//log.Printf("Encoded Packet %x\n", answerPacket.GetRawPacketBytes())
 
-	answerPacket.SendPacket(sndConf.ethPort)
+	ringBuffer.Put(answerPacket)
+	/*sndPkt, ok := ringBuffer.Get()
+	if ok {
+		sndPkt.(*packet.Packet).SendPacket(sndConf.ethPort)
+	}*/
+
+	//answerPacket.SendPacket(sndConf.ethPort)
 }
 
 func decode(pkt *packet.Packet) {
@@ -252,7 +274,7 @@ func decode(pkt *packet.Packet) {
 	answerPacket.Ether.SAddr = sndConf.local.macAddr
 
 	ipv4PktBytes := (*[1 << 30]byte)(pkt.Data)[:ipPktLen]
-	answerPacketBytes := answerPacket.GetRawPacketBytes()[types.EtherLen:types.EtherLen+ipPktLen]
+	answerPacketBytes := answerPacket.GetRawPacketBytes()[types.EtherLen : types.EtherLen+ipPktLen]
 	copy(answerPacketBytes, ipv4PktBytes)
 
 	//log.Printf("Decoded Packet %x\n", answerPacket.GetRawPacketBytes())
