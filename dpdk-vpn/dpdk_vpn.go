@@ -209,7 +209,10 @@ func encode(pkt *packet.Packet) bool {
 
 	ipv4PktBytes := (*[1 << 30]byte)(pkt.L3)[:ipPktLen]
 	answerPacketDataBytes := pkt.GetRawPacketBytes()[types.EtherLen+types.IPv4MinLen+types.UDPLen : types.EtherLen+types.IPv4MinLen+types.UDPLen+ipPktLen]
-	copy(answerPacketDataBytes, ipv4PktBytes)
+	for i := int(ipPktLen - 1); i >= 0; i-- {
+		answerPacketDataBytes[i] = ipv4PktBytes[i]
+	}
+	//copy(answerPacketDataBytes, ipv4PktBytes)
 
 	packet.InitEmptyIPv4UDPPacket(pkt, 0)
 	low.TrimMbuf(pkt.CMbuf, types.EtherLen)
@@ -257,7 +260,7 @@ func decode(pkt *packet.Packet) bool {
 	pkt.Ether.SAddr = sndConf.local.macAddr
 
 	ipv4PktBytes := (*[1 << 30]byte)(pkt.Data)[:ipPktLen]
-	low.TrimMbuf(pkt.CMbuf, types.IPv4MinLen + types.UDPLen)
+	low.TrimMbuf(pkt.CMbuf, types.IPv4MinLen+types.UDPLen)
 	answerPacketBytes := pkt.GetRawPacketBytes()[types.EtherLen : types.EtherLen+ipPktLen]
 	copy(answerPacketBytes, ipv4PktBytes)
 
