@@ -1,0 +1,24 @@
+{
+    "wan": {
+        "local": {
+            "eth_ip": "192.168.100.212",
+            "mac_addr": "a0:36:9f:3f:0a:c8"
+        },
+        "remote": {
+            "eth_ip": "192.168.100.211",
+            "mac_addr": "a0:36:9f:3f:09:24"
+        },
+        "eth_port": 0
+    },
+    "lan": {
+        "local": {
+            "eth_ip": "192.168.200.212",
+            "mac_addr": "a0:36:9f:3f:0a:ca"
+        },
+        "remote": {
+            "eth_ip": "192.168.200.213",
+            "mac_addr": "a0:36:9f:72:d3:1a"
+        },
+        "eth_port": 1
+    }
+}
