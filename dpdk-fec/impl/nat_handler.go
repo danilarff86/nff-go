@@ -9,8 +9,6 @@ import (
 	"unsafe"
 )
 
-const vecSize = 32
-
 func MyNatVectorHandler(curV []*packet.Packet, mask *[vecSize]bool, ctx flow.UserContext) {
 	portContext, ok := ctx.(PortContext)
 	if !ok {

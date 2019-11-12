@@ -5,13 +5,10 @@ import (
 	"github.com/intel-go/nff-go/dpdk-fec/delegate"
 	"github.com/intel-go/nff-go/dpdk-fec/impl"
 	"github.com/intel-go/nff-go/flow"
-	"github.com/intel-go/nff-go/packet"
 	"log"
 )
 
 var config delegate.Config
-
-const vecSize = 32
 
 func main() {
 	configFile := flag.String("config", "", "configuration file")
@@ -32,7 +29,7 @@ func main() {
 	} else if *mode == "NAT" {
 		myVectorHandler = impl.MyNatVectorHandler
 	} else if *mode == "DIRECT" {
-		myVectorHandler = myDirectVectorHandler
+		myVectorHandler = impl.MyDirectVectorHandler
 	} else {
 		log.Fatalf("Unsupported mode: '%s'\n", *mode)
 	}
@@ -60,7 +57,4 @@ func main() {
 	flow.CheckFatal(flow.SetSender(secondFlow, config.Lan.EthPort))
 
 	flow.CheckFatal(flow.SystemStart())
-}
-
-func myDirectVectorHandler(curV []*packet.Packet, mask *[vecSize]bool, ctx flow.UserContext) {
 }
