@@ -5,6 +5,7 @@ import (
 	"github.com/intel-go/nff-go/dpdk-fec/delegate"
 	"github.com/intel-go/nff-go/dpdk-fec/impl"
 	"github.com/intel-go/nff-go/flow"
+	"github.com/intel-go/nff-go/packet"
 	"log"
 )
 
@@ -34,13 +35,83 @@ func main() {
 		log.Fatalf("Unsupported mode: '%s'\n", *mode)
 	}
 
-	err, dg := delegate.NewDPDKInterface()
+	dg := delegate.NewDPDKNetworkInterface()
+	err = dg.Initialize(&config)
 	if err != nil {
-		log.Fatalf("unable to create dpdk interface: %+v\n", err)
+		log.Fatalf("unable to initialize dpdk interface: %+v\n", err)
 	}
-	dg.SendPacket(0, nil)
 
-	flow.CheckFatal(flow.SystemInit(nil))
+	var packets [32]*packet.Packet
+	var mask [32]bool
+
+	dg.StartProcessing(func() {
+		/*for*/ {
+			{
+				err, pkt := dg.RecvPacket(delegate.EthPort(config.Wan.EthPort))
+				if err != nil {
+					log.Fatalf("RecvPacket(%d) returned error: %+v\n", int(config.Wan.EthPort), err)
+				}
+				if pkt != nil {
+					packets[0] = pkt.Internal()
+					mask[0] = true
+					myVectorHandler(packets[:], &mask, impl.PortContext{Port: impl.WanPort, Config: &config})
+					if mask[0] {
+						err := dg.SendPacket(delegate.EthPort(config.Lan.EthPort), pkt)
+						if err != nil {
+							log.Fatalf("RecvPacket(%d) returned error: %+v\n", int(config.Lan.EthPort), err)
+						}
+					}
+				}
+			}
+			{
+				err, pkt := dg.RecvPacket(delegate.EthPort(config.Lan.EthPort))
+				if err != nil {
+					log.Fatalf("RecvPacket(%d) returned error: %+v\n", int(config.Lan.EthPort), err)
+				}
+				if pkt != nil {
+					packets[0] = pkt.Internal()
+					mask[0] = true
+					myVectorHandler(packets[:], &mask, impl.PortContext{Port: impl.LanPort, Config: &config})
+					if mask[0] {
+						err := dg.SendPacket(delegate.EthPort(config.Wan.EthPort), pkt)
+						if err != nil {
+							log.Fatalf("RecvPacket(%d) returned error: %+v\n", int(config.Wan.EthPort), err)
+						}
+					}
+				}
+			}
+			/*{
+				err, pkt := dg.RecvPacket(0)
+				if err != nil {
+					log.Fatalf("RecvPacket(0) returned error: %+v\n", err)
+				}
+				if pkt != nil {
+					err := dg.SendPacket(1, pkt)
+					if err != nil {
+						log.Fatalf("SendPacket(1) returned error: %+v\n", err)
+					}
+				}
+			}
+
+			{
+				err, pkt := dg.RecvPacket(1)
+				if err != nil {
+					log.Fatalf("RecvPacket(1) returned error: %+v\n", err)
+				}
+				if pkt != nil {
+					err := dg.SendPacket(0, pkt)
+					if err != nil {
+						log.Fatalf("SendPacket(0) returned error: %+v\n", err)
+					}
+				}
+			}*/
+		}
+	})
+
+	// UNUSED
+	_ = myVectorHandler
+
+	/*flow.CheckFatal(flow.SystemInit(nil))
 
 	firstFlow, err := flow.SetReceiver(config.Lan.EthPort)
 	flow.CheckFatal(err)
@@ -56,5 +127,5 @@ func main() {
 	//flow.CheckFatal(flow.SetStopper(secondFlow))
 	flow.CheckFatal(flow.SetSender(secondFlow, config.Lan.EthPort))
 
-	flow.CheckFatal(flow.SystemStart())
+	flow.CheckFatal(flow.SystemStart())*/
 }
